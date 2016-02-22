@@ -71,8 +71,6 @@ function CleanDeleteVM {
                 Remove-VM -Confirm} -ArgumentList $_ -Session $session
         }
     }
-    
 }
-
 
 Export-ModuleMember -Function 'Move-VMStorageSynchronous'
