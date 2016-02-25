@@ -43,24 +43,27 @@ function Move-VMStorageSynchronous {
 
 #MigrateVMStorage  -VMName '*','Red-Hawk-Rand*' -DestPath "X:\HyperVStore\" -Debug
 
-function CleanDeleteVM {
+function Remove-VMFull {
     [CmdletBinding(ConfirmImpact='High')]
     Param (
-        [String]$ComputerName = 'localhost',
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory=$True,Position=0,ValueFromPipeline=$True)]
         [String[]]$VMName,
+        [Parameter(Position=1)]
+        [String]$ComputerName = 'localhost',
         [pscredential]$Credential,
         [Switch]$WhatIf = $false,
-        [Switch]$Confirm = $true
+        [Switch]$Confirm = $true,
+        [string]$HVVersion = '1.1'
     )
     #Ensure running correct version of hyper-v mod
     Remove-Module -Name Hyper-V -Verbose:$False
-    Import-Module -Name Hyper-V -RequiredVersion '1.1' -ErrorAction Stop -Verbose:$False
+    Import-Module -Name Hyper-V -RequiredVersion $HVVersion -ErrorAction Stop -Verbose:$False
 
     if($ComputerName -ne 'localhost') {
         #Attempt to initiate a session with the remote host
         $session = New-PSSession $ComputerName -Credential $Credential -ErrorAction Stop
         $VMName | % {
+            Stop-VM $_ -Force -TurnOff
             Write-Verbose "Removing Virtual Hard Disk Files for VM: $_"
             Invoke-Command -ScriptBlock { $args[0] | Get-VMHardDiskDrive | select -ExpandProperty Path | 
                 % {Remove-Item $_ -Confirm }
@@ -71,6 +74,25 @@ function CleanDeleteVM {
                 Remove-VM -Confirm} -ArgumentList $_ -Session $session
         }
     }
+    else {
+        $VMName | % {
+            Write-Verbose "Stopping Virtual Machine $($_.Name)"
+            Stop-VM $_ -Force -TurnOff
+            Write-Verbose "Deleting VHDs"
+            $_ | Get-VMHardDiskDrive | select -ExpandProperty Path |
+                % { Remove-Item $_ -Confirm }
+            Write-Verbose "Deleting VM Configs"
+            $_ | Remove-VM -Confirm -ErrorAction Continue -ErrorVariable err
+
+            if($err) {
+                Write-Error "Error deleting VM $($_.Name): $err"
+            }
+            else {
+                Write-Verbose "VM $($_.Name) Sucessfully deleted"
+            }
+        }
+    }
 }
 
+Export-ModuleMember -Function 'Remove-VMFull'
 Export-ModuleMember -Function 'Move-VMStorageSynchronous'
