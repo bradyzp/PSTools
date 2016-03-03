@@ -44,51 +44,67 @@ function Move-VMStorageSynchronous {
 #MigrateVMStorage  -VMName '*','Red-Hawk-Rand*' -DestPath "X:\HyperVStore\" -Debug
 
 function Remove-VMFull {
-    [CmdletBinding(ConfirmImpact='High')]
+    [CmdletBinding(SupportsShouldProcess,
+                    ConfirmImpact='High')]
     Param (
-        [Parameter(Mandatory=$True,Position=0,ValueFromPipeline=$True)]
+        [Parameter(Mandatory,Position=0,ValueFromPipeline)]
         [String[]]$VMName,
         [Parameter(Position=1)]
         [String]$ComputerName = 'localhost',
         [pscredential]$Credential,
         [Switch]$WhatIf = $false,
-        [Switch]$Confirm = $true,
-        [string]$HVVersion = '1.1'
+        [string]$HVVersion = '1.1',
+        [Switch]$Force
     )
-    #Ensure running correct version of hyper-v mod
-    Remove-Module -Name Hyper-V -Verbose:$False
-    Import-Module -Name Hyper-V -RequiredVersion $HVVersion -ErrorAction Stop -Verbose:$False
+    BEGIN {
+        #$PSBoundParameters.Remove('Force')
 
-    if($ComputerName -ne 'localhost') {
-        #Attempt to initiate a session with the remote host
-        $session = New-PSSession $ComputerName -Credential $Credential -ErrorAction Stop
-        $VMName | % {
-            Stop-VM $_ -Force -TurnOff
-            Write-Verbose "Removing Virtual Hard Disk Files for VM: $_"
-            Invoke-Command -ScriptBlock { $args[0] | Get-VMHardDiskDrive | select -ExpandProperty Path | 
-                % {Remove-Item $_ -Confirm }
-              } -ArgumentList $_ -Session $session
-            
-            Write-Verbose "Deleting Virtual Machine $_"
-            Invoke-Command -ScriptBlock { $args[0] | 
-                Remove-VM -Confirm} -ArgumentList $_ -Session $session
-        }
     }
-    else {
-        $VMName | % {
-            Write-Verbose "Stopping Virtual Machine $($_.Name)"
-            Stop-VM $_ -Force -TurnOff
-            Write-Verbose "Deleting VHDs"
-            $_ | Get-VMHardDiskDrive | select -ExpandProperty Path |
-                % { Remove-Item $_ -Confirm }
-            Write-Verbose "Deleting VM Configs"
-            $_ | Remove-VM -Confirm -ErrorAction Continue -ErrorVariable err
+    PROCESS {
+        #Ensure running correct version of hyper-v mod
+        Remove-Module -Name Hyper-V -Verbose:$False
+        Import-Module -Name Hyper-V -RequiredVersion $HVVersion -ErrorAction Stop -Verbose:$False
 
-            if($err) {
-                Write-Error "Error deleting VM $($_.Name): $err"
+        if($ComputerName -ne 'localhost') {
+            #Attempt to initiate a session with the remote host
+            $session = New-PSSession $ComputerName -Credential $Credential -ErrorAction Stop
+            $VMName | % {
+                Stop-VM $_ -Force -TurnOff
+                Write-Verbose "Removing Virtual Hard Disk Files for VM: $_"
+                Invoke-Command -ScriptBlock { $args[0] | Get-VMHardDiskDrive | select -ExpandProperty Path | 
+                    % {Remove-Item $_ }
+                  } -ArgumentList $_ -Session $session
+            
+                Write-Verbose "Deleting Virtual Machine $_"
+                Invoke-Command -ScriptBlock { $args[0] | 
+                    Remove-VM -Confirm} -ArgumentList $_ -Session $session
             }
-            else {
-                Write-Verbose "VM $($_.Name) Sucessfully deleted"
+        }
+        else {
+            $VMName | % {
+                if($Force -or $PSCmdlet.ShouldProcess($_, "Force Stop VM and delete")) {
+                    Write-Verbose "Stopping Virtual Machine $_"
+                    Stop-VM $_ -Force -TurnOff
+                
+                
+                    Write-Verbose "Deleting VHDs"
+                    $_ | Get-VMHardDiskDrive | select -ExpandProperty Path |
+                        % { 
+                            if($Force -or $PSCmdlet.ShouldProcess($_, "Delete VHD")) {
+                                Remove-Item $_ -Confirm:$false | Out-Null
+                            }
+                          }
+                    Write-Verbose "Deleting VM Configs"
+                    if($Force -or $PSCmdlet.ShouldProcess($_, "Delete VMConfig")) {
+                        $_ | Remove-VM -Confirm:$false -Force -ErrorAction Continue -ErrorVariable err
+                    }
+                    else {
+                        Write-Warning "Retaining VM Config"
+                    }
+                }
+                else {
+                    Write-Warning "Aborting deletion of $_"
+                }
             }
         }
     }
