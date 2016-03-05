@@ -52,7 +52,6 @@ function Remove-VMFull {
         [Parameter(Position=1)]
         [String]$ComputerName = 'localhost',
         [pscredential]$Credential,
-        [Switch]$WhatIf = $false,
         [string]$HVVersion = '1.1',
         [Switch]$Force
     )
