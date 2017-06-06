@@ -1,7 +1,10 @@
 ﻿
-function Out-Unix {
+function Out-UnixOriginal {
 <#
 Credit for this function to Adrian@picuspickings.blogspot.com
+
+.SYNOPSIS
+    Write a stream out to file, replacing \r\n with \n (UNIX/Linux format)
 #>
     param ([string] $Path)
 
@@ -18,6 +21,62 @@ Credit for this function to Adrian@picuspickings.blogspot.com
     {
         $streamWriter.Flush()
         $streamWriter.Close()
+    }
+}
+
+function Out-Unix {
+    <#
+    .SYNOPSIS
+        Write a stream out to file, replacing \r\n with \n (UNIX/Linux format)
+    
+    .DESCRIPTION
+
+    .LINK
+        https://msdn.microsoft.com/en-us/library/f5f5x7kt%28v=vs.110%29.aspx?f=255&MSPPError=-2147217396
+    .NOTES
+        Credit to the original author Adrian@picuspickings.blogspot.com for the syntax of the StreamWriter & Out-String replacement
+        functionality.
+
+    #>
+    param (
+        [Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $false, HelpMessage = 'Path to output file, will attempt to resolve relative path')]
+        [String]$Path,
+        [Parameter(Position = 1, Mandatory = $true, ValueFromPipeline = $true, HelpMessage = 'Value to write to file')]
+        [String[]]$Stream
+    )
+    BEGIN {
+        $parent = Split-Path $Path -Parent
+        if(-not $parent) {
+            $parent = ".\"
+        }
+        $parent = (Resolve-Path $parent | Select-Object -ExpandProperty Path)
+        
+        $leaf = Split-Path $Path -Leaf
+        if($leaf -eq $Path) {
+            throw "Error, invalid filename"
+        }
+        
+        $fullpath = (Join-Path -Path $parent -ChildPath $leaf)
+        
+        $valid = $fullpath | Test-Path -IsValid
+        $container = $fullpath | Test-Path -PathType Container
+        if($valid -and (-not $container)) {
+            Write-Verbose "Writing stream to $fullpath"    
+        } else {
+            throw "Invalid path"
+        }
+
+        # Streamwriter(string path, bool append)
+        $StreamWriter = New-Object System.IO.StreamWriter([String]$fullpath, $false)
+    }
+    PROCESS {
+        foreach($object in $Stream) {
+            $StreamWriter.Write( ($object | Out-String).Replace("`r`n", "`n") )
+        }
+    }
+    END {
+        $StreamWriter.Flush()
+        $StreamWriter.Close()
     }
 }
 
@@ -73,18 +132,18 @@ function New-SslCSR {
         [Parameter(Mandatory = $false, HelpMessage='Display the openssl command to generate a certificate signing request using the generated config file')]
         [Switch]$ShowCmd,
         [Parameter(Mandatory = $false, HelpMessage='Generates configuration files and outputs to stdout without saving to file')]
-        [Switch]$noout,
+        [Switch]$NoOut,
         [Parameter(Mandatory = $false, HelpMessage='Execute openssl req command to generate CSR with new config file')]
         [Switch]$Generate,
         [Parameter(Mandatory = $false, HelpMessage='Submit generated csr to ADCS using certreq.exe', ParameterSetName='Submit')]
         [Switch]$Submit,
         [Parameter(Mandatory = $true, ParameterSetName='Submit')]
         [String]$CertificateTemplate
-    
     )
 
     BEGIN {
-        $CWD = Get-Item -Path ".\" | Select-Object -ExpandProperty FullName
+        $CWD = Resolve-Path ".\" | Select-Object -ExpandProperty Path
+        #$CWD = Get-Item -Path ".\" | Select-Object -ExpandProperty FullName
         if (-not $OutPath){
             $OutPath = $CWD
         }
@@ -126,7 +185,7 @@ subjectAltName = @alt_names
 [alt_names]
 $SAN_DNS
 "@
-            if(-not $Noout) {
+            if(-not $NoOut) {
                 $Config | Out-Unix -Path $OutPath
                 $cfg_path = (Get-ChildItem $OutPath).FullName
                 Write-Debug "Configuration written to $cfg_path"        
@@ -177,5 +236,3 @@ certreq.exe -submit -attrib "CertificateTemplate:<TemplateName>" $OutPath
 }
 
 Export-ModuleMember -Function 'New-SslCSR'
-
-#'rh-fw-1.ad.rusthawk.net','prtg.ad.rusthawk.net' | Generate-CSR -Bits 1024
